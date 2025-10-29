@@ -62,6 +62,7 @@ sudo bash -c 'WEBHOOK_URL="YOUR_WEBHOOK_URL" WEBHOOK_TYPE="discord" bash <(curl 
      "type": "container_reboot",
      "time": "2025-10-28T10:05:23Z",
      "restartCount": 2,
+     "host": "my-server",
      "container": {
        "id": "2a8b6b4f27c8",
        "name": "api-server",
@@ -69,9 +70,94 @@ sudo bash -c 'WEBHOOK_URL="YOUR_WEBHOOK_URL" WEBHOOK_TYPE="discord" bash <(curl 
      }
    }
    ```
+
+   For Lark/Feishu, the message format is:
+   ```
+   Container restarted
+   Host: my-server
+   Name: /api-server
+   Image: nginx:1.27
+   Restart count: 2
+   Time: 2025-10-28T10:05:23Z
+   ```
+
 4. The payload is POSTed to your configured webhook endpoint.
 
 **Note:** Built-in support for Lark/Feishu, Slack, Discord, and generic webhooks. Just set `WEBHOOK_TYPE` during installation.
+
+---
+
+## 🧪 Testing
+
+### Test webhook connection
+Send a test message to verify your webhook is working:
+
+```bash
+# Lark/Feishu
+curl -X POST "YOUR_WEBHOOK_URL" \
+  -H "Content-Type: application/json" \
+  -d '{"msg_type":"text","content":{"text":"Test message from Docker Reboot Monitor"}}'
+
+# Slack
+curl -X POST "YOUR_WEBHOOK_URL" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Test message from Docker Reboot Monitor"}'
+
+# Discord
+curl -X POST "YOUR_WEBHOOK_URL" \
+  -H "Content-Type: application/json" \
+  -d '{"content":"Test message from Docker Reboot Monitor"}'
+```
+
+### Test by simulating a container crash
+
+**Important:** `docker restart` does NOT increment `RestartCount`. The count only increases when Docker's restart policy automatically restarts a crashed container.
+
+To properly test, make a container crash:
+
+```bash
+# Method 1: Kill the main process inside a container
+docker exec CONTAINER_NAME kill 1
+
+# Method 2: Send SIGTERM to the container's main process
+docker kill --signal=TERM CONTAINER_NAME
+
+# Wait a moment for Docker to auto-restart it (if restart policy is set)
+sleep 5
+
+# Check if restart count increased
+docker inspect CONTAINER_NAME --format "{{.RestartCount}}"
+
+# Run the script manually
+sudo /usr/local/bin/docker-reboot-monitor.sh
+
+# Check logs for webhook activity
+journalctl -u docker-reboot-monitor.service -n 10 --no-pager
+```
+
+**Note:** Your container must have a restart policy (like `always`, `unless-stopped`, or `on-failure`) for this to work:
+
+```bash
+# Check restart policy
+docker inspect CONTAINER_NAME --format "{{.HostConfig.RestartPolicy.Name}}"
+
+# If empty or "no", update it:
+docker update --restart=unless-stopped CONTAINER_NAME
+```
+
+### Manual script test with debugging
+Run the script with verbose output:
+
+```bash
+# Run manually
+sudo /usr/local/bin/docker-reboot-monitor.sh
+
+# Check what happened
+echo "Exit code: $?"
+
+# Check state file
+cat /var/tmp/docker-restartcount.state
+```
 
 ---
 
@@ -190,18 +276,9 @@ Supported types: `generic`, `lark`, `slack`, `discord`
 ---
 
 ## 🧠 Tips
-- Filter monitored containers:
-  Change
-  ```bash
-  docker ps -q
-  ```
-  to
-  ```bash
-  docker ps -q --filter label=monitor=true
-  ```
-  inside the script.
-- Increase interval (e.g., 5–10 minutes) for large hosts.
-- Add hostname or signature to payload for multi-host setups.
+- **Multi-host setups**: Hostname is automatically included in all alerts, so you can easily identify which server had a restart.
+- **Filter monitored containers**: Edit `/usr/local/bin/docker-reboot-monitor.sh` and change `docker ps -q` to `docker ps -q --filter label=monitor=true` to only monitor tagged containers.
+- **Adjust interval**: Use `INTERVAL="10min"` during installation for large hosts or less frequent checks.
 
 ---
 

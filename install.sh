@@ -14,16 +14,16 @@ WEBHOOK_TYPE="${WEBHOOK_TYPE:-generic}"
 # Generate payload command based on webhook type
 case "$WEBHOOK_TYPE" in
   lark|feishu)
-    PAYLOAD_CMD='payload=$(jq -n --arg id "$id" --arg name "$name" --arg image "$image" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson restartCount "$rc" '\''{msg_type:"text",content:{text:"Container restarted\nName: \($name)\nImage: \($image)\nRestart count: \($restartCount)\nTime: \($ts)"}}'\'')'
+    PAYLOAD_CMD='payload=$(jq -n --arg id "$id" --arg name "$name" --arg image "$image" --arg host "$(hostname)" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson restartCount "$rc" '\''{msg_type:"text",content:{text:"Container restarted\nHost: \($host)\nName: \($name)\nImage: \($image)\nRestart count: \($restartCount)\nTime: \($ts)"}}'\'')'
     ;;
   slack)
-    PAYLOAD_CMD='payload=$(jq -n --arg id "$id" --arg name "$name" --arg image "$image" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson restartCount "$rc" '\''{text:"Container *\($name)* restarted (\($restartCount)x)\nImage: `\($image)`\nTime: \($ts)"}'\'')'
+    PAYLOAD_CMD='payload=$(jq -n --arg id "$id" --arg name "$name" --arg image "$image" --arg host "$(hostname)" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson restartCount "$rc" '\''{text:":warning: Container *\($name)* restarted (\($restartCount)x) on `\($host)`\nImage: `\($image)`\nTime: \($ts)"}'\'')'
     ;;
   discord)
-    PAYLOAD_CMD='payload=$(jq -n --arg id "$id" --arg name "$name" --arg image "$image" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson restartCount "$rc" '\''{content:"Container **\($name)** restarted (\($restartCount)x)\nImage: `\($image)`\nTime: \($ts)"}'\'')'
+    PAYLOAD_CMD='payload=$(jq -n --arg id "$id" --arg name "$name" --arg image "$image" --arg host "$(hostname)" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson restartCount "$rc" '\''{content:":warning: Container **\($name)** restarted (\($restartCount)x) on `\($host)`\nImage: `\($image)`\nTime: \($ts)"}'\'')'
     ;;
   *)
-    PAYLOAD_CMD='payload=$(jq -n --arg id "$id" --arg name "$name" --arg image "$image" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson restartCount "$rc" '\''{type:"container_reboot",time:$ts,restartCount:$restartCount,container:{id:$id,name:$name,image:$image}}'\'')'
+    PAYLOAD_CMD='payload=$(jq -n --arg id "$id" --arg name "$name" --arg image "$image" --arg host "$(hostname)" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson restartCount "$rc" '\''{type:"container_reboot",time:$ts,restartCount:$restartCount,host:$host,container:{id:$id,name:$name,image:$image}}'\'')'
     ;;
 esac
 
