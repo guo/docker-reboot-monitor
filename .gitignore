@@ -1,0 +1,26 @@
+# macOS
+.DS_Store
+._*
+
+# Linux
+*~
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing/Development
+*.bak
+*.tmp
+*.log
+test/
+
+# State files (if testing locally)
+*.state
