@@ -116,14 +116,20 @@ curl -X POST "YOUR_WEBHOOK_URL" \
 To properly test, make a container crash:
 
 ```bash
-# Method 1: Kill the main process inside a container
-docker exec CONTAINER_NAME kill 1
+# Method 1: Stop the container (simulates crash)
+docker stop CONTAINER_NAME
 
-# Method 2: Send SIGTERM to the container's main process
-docker kill --signal=TERM CONTAINER_NAME
+# Docker will auto-restart it if restart policy is set
+sleep 2
 
-# Wait a moment for Docker to auto-restart it (if restart policy is set)
+# Method 2: Kill the container process
+docker kill --signal=KILL CONTAINER_NAME
+
+# Wait for Docker to auto-restart
 sleep 5
+
+# Method 3: If container has kill command (may not work on minimal images)
+docker exec CONTAINER_NAME kill 1
 
 # Check if restart count increased
 docker inspect CONTAINER_NAME --format "{{.RestartCount}}"
