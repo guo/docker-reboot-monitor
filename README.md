@@ -111,28 +111,23 @@ curl -X POST "YOUR_WEBHOOK_URL" \
 
 ### Test by simulating a container crash
 
-**Important:** `docker restart` does NOT increment `RestartCount`. The count only increases when Docker's restart policy automatically restarts a crashed container.
+**Important:** Docker's `RestartCount` only increments when the application **inside** the container crashes naturally. Manual `docker stop`, `docker kill`, or `docker restart` commands do NOT increment the count, even if Docker auto-restarts the container.
 
-To properly test, make a container crash:
+**To properly test:**
 
 ```bash
-# Method 1: Stop the container (simulates crash)
-docker stop CONTAINER_NAME
+# Method 1: Kill the container's main process from the host
+# Find the process ID
+docker inspect CONTAINER_NAME --format '{{.State.Pid}}'
 
-# Docker will auto-restart it if restart policy is set
-sleep 2
-
-# Method 2: Kill the container process
-docker kill --signal=KILL CONTAINER_NAME
-
-# Wait for Docker to auto-restart
-sleep 5
-
-# Method 3: If container has kill command (may not work on minimal images)
-docker exec CONTAINER_NAME kill 1
+# Kill it directly (simulates real crash)
+sudo kill -9 <PID>
 
 # Check if restart count increased
 docker inspect CONTAINER_NAME --format "{{.RestartCount}}"
+
+# Method 2: Make the application crash from inside (if you can access it)
+# For example, for a web app, trigger a fatal error through the application
 
 # Run the script manually
 sudo /usr/local/bin/docker-reboot-monitor.sh
@@ -140,6 +135,8 @@ sudo /usr/local/bin/docker-reboot-monitor.sh
 # Check logs for webhook activity
 journalctl -u docker-reboot-monitor.service -n 10 --no-pager
 ```
+
+**Reality check:** If your containers are stable and healthy (RestartCount = 0), there's nothing to test! The monitoring will alert you when a **real crash** happens. You don't need to artificially create crashes to verify it works.
 
 **Note:** Your container must have a restart policy (like `always`, `unless-stopped`, or `on-failure`) for this to work:
 
@@ -200,6 +197,11 @@ sudo /usr/local/bin/docker-reboot-monitor.sh
 - **Docker not running**: Ensure Docker service is running: `sudo systemctl status docker`
 - **Permissions**: The script needs to access Docker socket (usually requires root)
 - **No running containers**: The script will run successfully but do nothing until containers are started
+- **"Unit docker.service not found"**: If Docker is installed via snap, the service is named differently. Fix by re-running the installation, or manually edit `/etc/systemd/system/docker-reboot-monitor.service` and change `docker.service` to `snap.docker.dockerd.service`, then run:
+  ```bash
+  sudo systemctl daemon-reload
+  sudo systemctl restart docker-reboot-monitor.timer
+  ```
 
 ---
 

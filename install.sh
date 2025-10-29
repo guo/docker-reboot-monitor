@@ -56,12 +56,18 @@ EOF
 
 chmod +x /usr/local/bin/docker-reboot-monitor.sh
 
+# Detect Docker service name
+DOCKER_SERVICE="docker.service"
+if systemctl list-units --type=service --all | grep -q "snap.docker.dockerd.service"; then
+  DOCKER_SERVICE="snap.docker.dockerd.service"
+fi
+
 # Create systemd service
 cat >/etc/systemd/system/docker-reboot-monitor.service <<EOF
 [Unit]
 Description=Check docker container reboot and send webhook
-After=docker.service
-Requires=docker.service
+After=$DOCKER_SERVICE
+Wants=$DOCKER_SERVICE
 
 [Service]
 Type=oneshot
