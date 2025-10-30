@@ -58,6 +58,11 @@ get_process_info() {
   fi
 }
 
+sanitize_key() {
+  # Convert string to safe key by creating MD5 hash
+  echo -n "$1" | md5sum | cut -d' ' -f1
+}
+
 send_webhook() {
   local id="$1" name="$2" image="$3" rc="$4" type="${5:-process}"
   PAYLOAD_CMD_PLACEHOLDER
@@ -75,7 +80,8 @@ if [[ -n "$MONITOR_PROCESSES" ]]; then
     if [[ "$proc" =~ ^cmd:(.+)$ ]]; then
       # Monitor by command line pattern
       pattern="${BASH_REMATCH[1]}"
-      key="cmd_${pattern}"
+      key_hash=$(sanitize_key "$pattern")
+      key="cmd_${key_hash}"
 
       # Find PID matching the command pattern
       current_pid=$(pgrep -f "$pattern" 2>/dev/null | head -n 1)
@@ -87,6 +93,7 @@ if [[ -n "$MONITOR_PROCESSES" ]]; then
         proc_info=$(get_process_info "$current_pid")
         last["name_${key}"]="$proc_info"
         last["pid_${key}"]="$current_pid"
+        last["pattern_${key}"]="$pattern"
         last[$key]="running"
       else
         # No process found matching pattern
