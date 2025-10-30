@@ -177,7 +177,7 @@ if [[ -n "$MONITOR_PROCESSES" ]]; then
   done
 fi
 
-{ echo "# autogen"; for k in "${!last[@]}"; do echo "last[$k]=${last[$k]}"; done; } > "$STATE_FILE"
+{ echo "# autogen"; for k in "${!last[@]}"; do printf "last[%s]=%q\n" "$k" "${last[$k]}"; done; } > "$STATE_FILE"
 SCRIPT_EOF
 
 # Replace placeholders
