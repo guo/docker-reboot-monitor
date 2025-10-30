@@ -10,9 +10,10 @@ fi
 if [[ -z "${MONITOR_PROCESSES:-}" ]]; then
   echo "Error: MONITOR_PROCESSES environment variable is required"
   echo "Examples:"
-  echo "  MONITOR_PROCESSES=\"nginx,postgresql,myapp\"          # Monitor by name"
-  echo "  MONITOR_PROCESSES=\"nginx,pid:12345\"                 # Mix names and PIDs"
-  echo "  MONITOR_PROCESSES=\"pid:12345,pid:67890\"             # Monitor specific PIDs"
+  echo "  MONITOR_PROCESSES=\"nginx,postgresql,myapp\"                    # Monitor by name"
+  echo "  MONITOR_PROCESSES=\"pid:12345\"                                # Monitor specific PID"
+  echo "  MONITOR_PROCESSES=\"cmd:bun.*server\"                          # Monitor by command pattern"
+  echo "  MONITOR_PROCESSES=\"nginx,pid:12345,cmd:node.*app.js\"         # Mix all formats"
   exit 1
 fi
 
@@ -47,6 +48,16 @@ declare -A last
 WEBHOOK_URL="WEBHOOK_URL_PLACEHOLDER"
 MONITOR_PROCESSES="MONITOR_PROCESSES_PLACEHOLDER"
 
+get_process_info() {
+  local pid="$1"
+  if [[ -f "/proc/$pid/cmdline" ]]; then
+    # Get full command line, replacing nulls with spaces
+    tr '\0' ' ' < "/proc/$pid/cmdline" | sed 's/ $//'
+  else
+    cat "/proc/$pid/comm" 2>/dev/null || echo "unknown"
+  fi
+}
+
 send_webhook() {
   local id="$1" name="$2" image="$3" rc="$4" type="${5:-process}"
   PAYLOAD_CMD_PLACEHOLDER
@@ -60,19 +71,49 @@ if [[ -n "$MONITOR_PROCESSES" ]]; then
     proc=$(echo "$proc" | xargs)  # trim whitespace
     [[ -z "$proc" ]] && continue
 
+    # Check if it's a command pattern (format: cmd:pattern)
+    if [[ "$proc" =~ ^cmd:(.+)$ ]]; then
+      # Monitor by command line pattern
+      pattern="${BASH_REMATCH[1]}"
+      key="cmd_${pattern}"
+
+      # Find PID matching the command pattern
+      current_pid=$(pgrep -f "$pattern" 2>/dev/null | head -n 1)
+      stored_pid="${last[pid_${key}]:-}"
+      was_running="${last[$key]:-}"
+
+      if [[ -n "$current_pid" ]]; then
+        # Found a process matching the pattern
+        proc_info=$(get_process_info "$current_pid")
+        last["name_${key}"]="$proc_info"
+        last["pid_${key}"]="$current_pid"
+        last[$key]="running"
+      else
+        # No process found matching pattern
+        if [[ "$was_running" == "running" ]]; then
+          # Process was running before, now it's gone
+          death_key="d_${key}"
+          death_count=${last[$death_key]:-0}
+          death_count=$((death_count + 1))
+          last[$death_key]=$death_count
+
+          proc_info=$(echo "${last[name_${key}]:-$pattern}")
+          send_webhook "cmd:$pattern" "$proc_info" "process died/killed" "$death_count" "process"
+        fi
+        last[$key]="stopped"
+        unset "last[pid_${key}]"
+      fi
     # Check if it's a PID (format: pid:12345)
-    if [[ "$proc" =~ ^pid:([0-9]+)$ ]]; then
+    elif [[ "$proc" =~ ^pid:([0-9]+)$ ]]; then
       # Monitor specific PID
       target_pid="${BASH_REMATCH[1]}"
       key="pid_${target_pid}"
       was_running="${last[$key]:-}"
 
       if [[ -d "/proc/$target_pid" ]]; then
-        # PID exists
-        if [[ "$was_running" != "running" ]]; then
-          # First time seeing this PID running, get process name
-          proc_name=$(cat "/proc/$target_pid/comm" 2>/dev/null || echo "unknown")
-        fi
+        # PID exists - always update the full command line
+        proc_info=$(get_process_info "$target_pid")
+        last["name_${target_pid}"]="$proc_info"
         last[$key]="running"
       else
         # PID no longer exists
@@ -83,15 +124,10 @@ if [[ -n "$MONITOR_PROCESSES" ]]; then
           death_count=$((death_count + 1))
           last[$death_key]=$death_count
 
-          proc_name=$(echo "${last[name_${target_pid}]:-unknown}")
-          send_webhook "pid:$target_pid" "PID $target_pid ($proc_name)" "process died/killed" "$death_count" "process"
+          proc_info=$(echo "${last[name_${target_pid}]:-unknown}")
+          send_webhook "pid:$target_pid" "$proc_info" "process died/killed" "$death_count" "process"
         fi
         last[$key]="stopped"
-      fi
-      # Store process name for later reference
-      if [[ -d "/proc/$target_pid" ]]; then
-        proc_name=$(cat "/proc/$target_pid/comm" 2>/dev/null || echo "unknown")
-        last["name_${target_pid}"]="$proc_name"
       fi
     # Try systemd service
     elif systemctl is-active --quiet "$proc" 2>/dev/null || systemctl list-units --all | grep -q "^\s*$proc.service"; then
@@ -119,11 +155,15 @@ if [[ -n "$MONITOR_PROCESSES" ]]; then
           death_count=$((death_count + 1))
           last[$death_key]=$death_count
 
-          send_webhook "$proc" "$proc (process)" "process died/killed" "$death_count" "process"
+          # Get the stored full command if available
+          stored_info="${last[name_${proc}]:-$proc}"
+          send_webhook "$proc" "$stored_info" "process died/killed" "$death_count" "process"
         fi
         last[$key]="stopped"
       else
-        # Process is running
+        # Process is running - store full command line
+        proc_info=$(get_process_info "$pid")
+        last["name_${proc}"]="$proc_info"
         last[$key]="running"
       fi
     fi

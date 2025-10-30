@@ -56,15 +56,18 @@ sudo bash -c 'WEBHOOK_URL="YOUR_WEBHOOK_URL" WEBHOOK_TYPE="discord" MONITOR_PROC
 # Monitor specific PIDs
 sudo bash -c 'WEBHOOK_URL="YOUR_WEBHOOK_URL" MONITOR_PROCESSES="pid:12345,pid:67890" bash <(curl -sSL https://raw.githubusercontent.com/guo/docker-reboot-monitor/main/process/install.sh)'
 
-# Mix service names, process names, and PIDs
-sudo bash -c 'WEBHOOK_URL="YOUR_WEBHOOK_URL" MONITOR_PROCESSES="nginx,myapp,pid:12345" bash <(curl -sSL https://raw.githubusercontent.com/guo/docker-reboot-monitor/main/process/install.sh)'
+# Monitor by command pattern (great for bun/node apps)
+sudo bash -c 'WEBHOOK_URL="YOUR_WEBHOOK_URL" MONITOR_PROCESSES="cmd:bun.*server,cmd:node.*app.js" bash <(curl -sSL https://raw.githubusercontent.com/guo/docker-reboot-monitor/main/process/install.sh)'
+
+# Mix all formats
+sudo bash -c 'WEBHOOK_URL="YOUR_WEBHOOK_URL" MONITOR_PROCESSES="nginx,pid:12345,cmd:bun.*server" bash <(curl -sSL https://raw.githubusercontent.com/guo/docker-reboot-monitor/main/process/install.sh)'
 ```
 
 ---
 
 ## 🧩 How It Works
 
-The script monitors processes in three different ways:
+The script monitors processes in four different ways:
 
 ### 1. Systemd Services (Recommended)
 
@@ -92,11 +95,32 @@ For monitoring specific process instances:
 - Checks if `/proc/PID` exists (Linux-specific)
 - Tracks when that specific PID disappears
 - Useful when multiple processes have the same name
-- Retrieves process name from `/proc/PID/comm` for alert context
+- Shows full command line from `/proc/PID/cmdline` in alerts
 
 Example: `MONITOR_PROCESSES="pid:12345,pid:67890"` monitors those specific PIDs
 
 **Note**: PID monitoring requires Linux with `/proc` filesystem.
+
+### 4. Command Pattern Matching (Best for bun/node)
+
+For monitoring processes by their command line:
+- Use format: `cmd:pattern` (supports regex)
+- Uses `pgrep -f` to find processes matching the pattern
+- Perfect for distinguishing between multiple `bun` or `node` processes
+- Shows full command line in alerts
+- Automatically tracks the PID of the matching process
+
+Examples:
+- `cmd:bun.*server` - matches "bun run server.ts", "bun server.js", etc.
+- `cmd:node.*app.js` - matches "node app.js", "node dist/app.js", etc.
+- `cmd:bun run dev` - matches exactly "bun run dev"
+
+**Perfect for** distinguishing between:
+```
+64560  bun run server.ts --port 3000
+89246  bun run worker.ts
+89247  bun run queue.ts
+```
 
 ### Payload Example
 
@@ -123,6 +147,67 @@ Type: systemd service restarted
 Count: 3
 Time: 2025-10-29T10:05:23Z
 ```
+
+---
+
+## 🔍 Finding Process PIDs
+
+### Method 1: Using pgrep (recommended)
+
+```bash
+# Find all processes by name
+pgrep bun
+# Output: 64560, 89246, 89247
+
+# Find processes with full command line matching
+pgrep -f "bun run server"
+# Output: 64560
+
+pgrep -f "node.*app.js"
+# Output: 12345
+```
+
+### Method 2: Using ps with grep
+
+```bash
+# Show all bun processes with full commands
+ps aux | grep bun | grep -v grep
+# Output:
+# user  64560  ... bun run server.ts --port 3000
+# user  89246  ... bun run worker.ts
+# user  89247  ... bun run queue.ts
+
+# Get specific PID
+ps aux | grep "bun run server" | grep -v grep | awk '{print $2}'
+# Output: 64560
+```
+
+### Method 3: Using pidof
+
+```bash
+# Simple process name lookup
+pidof nginx
+# Output: 1234 5678 9012
+
+# Note: pidof doesn't search command line, only process names
+```
+
+### Recommended: Use command patterns instead
+
+Instead of manually finding PIDs, use the `cmd:pattern` format:
+
+```bash
+# Instead of:
+# 1. Find PID: pgrep -f "bun run server" → 64560
+# 2. MONITOR_PROCESSES="pid:64560"
+
+# Just do:
+MONITOR_PROCESSES="cmd:bun run server"
+# Or with regex:
+MONITOR_PROCESSES="cmd:bun.*server"
+```
+
+The command pattern automatically finds and tracks the matching process!
 
 ---
 
@@ -339,18 +424,21 @@ sudo bash -c 'WEBHOOK_URL="YOUR_WEBHOOK_URL" WEBHOOK_TYPE="lark" MONITOR_PROCESS
 
 - **Choosing the right monitoring method**:
   - **Systemd services**: Best option - reliable restart tracking
-  - **Process by name**: Use for non-systemd processes - detects when process dies
-  - **Process by PID**: Use when you need to track a specific process instance
+  - **Command patterns** (`cmd:pattern`): Perfect for bun/node apps with multiple instances
+  - **Process by name**: Use for non-systemd processes with unique names
+  - **Process by PID**: Use when you need to track a very specific process instance
 - **Process names**: Make sure the name matches what `pgrep` finds. Test first: `pgrep YOUR_PROCESS`
+- **Command patterns**: Support regex - `cmd:bun.*server` matches any bun command containing "server"
 - **PID format**: Always use `pid:12345` format (with `pid:` prefix)
-- **Multiple instances**: If you have multiple processes with the same name, use PIDs to track specific instances
+- **Finding PIDs**: Use `pgrep -f "pattern"` or `ps aux | grep "pattern"` (see "Finding Process PIDs" section)
+- **Multiple bun/node processes**: Use command patterns instead of PIDs: `cmd:bun run server`, `cmd:node app.js`
 - **Multi-host setups**: Hostname is automatically included in all alerts
 - **Adjust interval**: Use `INTERVAL="10min"` for less frequent checks
 - **State file**: Located at `/var/tmp/process-restartcount.state`
   - Stores current state (running/stopped) for each process
   - Stores death count for regular processes and PIDs
   - Stores last restart count for systemd services
-  - Stores process name for monitored PIDs (for alert context)
+  - Stores full command line for better alerts
 
 ---
 
@@ -371,14 +459,24 @@ sudo bash -c 'WEBHOOK_URL="YOUR_WEBHOOK_URL" WEBHOOK_TYPE="lark" MONITOR_PROCESS
 - ✅ Detects: When that specific PID terminates
 - ✅ Counts: How many times that PID died (useful if process restarts with same PID)
 - ✅ Precision: Tracks exact process instance, not just name
+- ✅ Shows: Full command line in alerts
 - ⚠️ Limitation: If process restarts with new PID, you need to update configuration
+
+### Command Patterns
+- ✅ Detects: When matching process terminates
+- ✅ Counts: How many times the process died
+- ✅ Flexible: Uses regex patterns to match command lines
+- ✅ Shows: Full command line in alerts
+- ✅ Auto-tracks: Automatically finds new PID if process restarts
+- ⚠️ Limitation: Monitors first matching process if multiple matches exist
 
 ### Best Practices
 - Use systemd services whenever possible for most reliable tracking
-- Use PIDs when you need to track specific process instances
+- **Use command patterns for bun/node apps** - better than PIDs since it survives restarts
+- Use PIDs only when you need to track a very specific process instance
 - Use process names for simple monitoring of non-systemd processes
-- Test process names with `pgrep` before adding to `MONITOR_PROCESSES`
-- Get PIDs with `pgrep PROCESS_NAME` or `pidof PROCESS_NAME`
+- Test patterns with `pgrep -f "pattern"` before adding to `MONITOR_PROCESSES`
+- Get PIDs with `pgrep -f "pattern"` or `ps aux | grep "pattern"`
 
 ---
 
